@@ -3,12 +3,23 @@ fn main() {
         windows::win32::system_services::{
             DXGI_ERROR_UNSUPPORTED,
         }
+        windows::win32::dxgi::{
+            DXGI_FORMAT,
+            DXGI_SAMPLE_DESC,
+        }
         windows::win32::direct3d11::{
             D3D11CreateDevice,
             D3D_DRIVER_TYPE,
             D3D11_CREATE_DEVICE_FLAG,
             D3D11_SDK_VERSION,
             ID3D11Device,
+            D3D11_TEXTURE2D_DESC,
+            D3D11_USAGE,
+            D3D11_BIND_FLAG,
+            D3D11_RENDER_TARGET_VIEW_DESC,
+            D3D11_RTV_DIMENSION,
+            ID3D11Resource,
+            ID3D11RenderTargetView,
         }
     );
 }
