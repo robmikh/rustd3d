@@ -89,6 +89,7 @@ fn main() -> windows::Result<()> {
     let render_target_view_desc = D3D11_RENDER_TARGET_VIEW_DESC {
         format: texture_desc.format,
         view_dimension: D3D11_RTV_DIMENSION::D3D11_RTV_DIMENSION_TEXTURE2D,
+        // TODO: D3D11_TEX2D_RTV
         anonymous: false,
     };
     let render_target_view = {
