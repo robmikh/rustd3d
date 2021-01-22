@@ -20,6 +20,8 @@ fn main() {
             D3D11_RTV_DIMENSION,
             ID3D11Resource,
             ID3D11RenderTargetView,
+            ID3D11Texture2D,
+            ID3D11DeviceChild,
         }
     );
 }
