@@ -2,8 +2,8 @@ use bindings::windows::{
     win32::{
         direct3d11::{
             D3D11CreateDevice, ID3D11Device, ID3D11RenderTargetView, ID3D11Resource,
-            D3D11_BIND_FLAG, D3D11_CREATE_DEVICE_FLAG, D3D11_RENDER_TARGET_VIEW_DESC,
-            D3D11_RTV_DIMENSION, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE,
+            D3D11_BIND_FLAG, D3D11_CPU_ACCESS_FLAG, D3D11_CREATE_DEVICE_FLAG, D3D11_MAP,
+            D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE,
             D3D_DRIVER_TYPE,
         },
         dxgi::{DXGI_FORMAT, DXGI_SAMPLE_DESC},
@@ -104,36 +104,81 @@ fn main() -> windows::Result<()> {
     assert_eq!(desc.cpu_access_flags, texture_desc.cpu_access_flags);
     assert_eq!(desc.misc_flags, texture_desc.misc_flags);
 
-    // Doesn't work yet
-    if false {
-        println!("Creating render target view...");
-        let render_target_view_desc = D3D11_RENDER_TARGET_VIEW_DESC {
-            format: texture_desc.format,
-            view_dimension: D3D11_RTV_DIMENSION::D3D11_RTV_DIMENSION_TEXTURE2D,
-            // TODO: D3D11_TEX2D_RTV
-            anonymous: false,
-        };
-        let render_target_view = {
-            let resource: ID3D11Resource = texture.cast()?;
-            let mut render_target_view = None;
-            device
-                .CreateRenderTargetView(
-                    Some(resource),
-                    &render_target_view_desc,
-                    &mut render_target_view,
-                )
-                .ok()?;
-            render_target_view
-                .unwrap()
-                .cast::<ID3D11RenderTargetView>()?
-        };
+    println!("Creating render target view...");
+    let render_target_view = {
+        let resource: ID3D11Resource = texture.cast()?;
+        let mut render_target_view = None;
+        device
+            .CreateRenderTargetView(Some(resource), std::ptr::null(), &mut render_target_view)
+            .ok()?;
+        render_target_view
+            .unwrap()
+            .cast::<ID3D11RenderTargetView>()?
+    };
 
-        println!("Clearing render target view...");
-        context.ClearRenderTargetView(
-            Some(render_target_view),
-            &[1.0f32, 0.0, 0.0, 1.0] as *const f32,
-        );
-    }
+    println!("Clearing render target view...");
+    context.ClearRenderTargetView(
+        Some(render_target_view),
+        &[1.0f32, 0.0, 0.0, 1.0] as *const f32,
+    );
+
+    // Check to see that the texture was properly cleared
+
+    println!("Creating staging texture...");
+    desc.usage = D3D11_USAGE::D3D11_USAGE_STAGING;
+    desc.bind_flags = 0;
+    desc.cpu_access_flags = D3D11_CPU_ACCESS_FLAG::D3D11_CPU_ACCESS_READ.0 as u32;
+    desc.misc_flags = 0;
+    let staging_texture = {
+        let mut texture = None;
+        device
+            .CreateTexture2D(&desc, std::ptr::null(), &mut texture)
+            .ok()?;
+        texture.unwrap()
+    };
+    context.CopyResource(&staging_texture, &texture);
+
+    // Map the staging texture and check the center pixel
+    let resource: ID3D11Resource = staging_texture.cast()?;
+    let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+    context
+        .Map(
+            Some(resource.clone()),
+            0,
+            D3D11_MAP::D3D11_MAP_READ,
+            0,
+            &mut mapped as *mut _,
+        )
+        .ok()?;
+
+    let slice: &[u8] = unsafe {
+        std::slice::from_raw_parts(
+            mapped.p_data as *const _,
+            (desc.height * mapped.row_pitch) as usize,
+        )
+    };
+
+    println!("Checking the center of the texture...");
+    let width = desc.width;
+    let height = desc.height;
+    let x = width / 2;
+    let y = height / 2;
+    let bytes_per_pixel = 4;
+    let offset = ((y * mapped.row_pitch) + (x * bytes_per_pixel)) as usize;
+
+    // BGRA
+    let blue = slice[offset + 0];
+    let green = slice[offset + 1];
+    let red = slice[offset + 2];
+    let alpha = slice[offset + 3];
+
+    assert_eq!(blue, 0);
+    assert_eq!(green, 0);
+    assert_eq!(red, 255);
+    assert_eq!(alpha, 255);
+    println!("Passed!");
+
+    context.Unmap(Some(resource), 0);
 
     println!("Done!");
     Ok(())

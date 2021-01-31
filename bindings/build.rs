@@ -22,6 +22,9 @@ fn main() {
             ID3D11RenderTargetView,
             ID3D11Texture2D,
             ID3D11DeviceChild,
+            D3D11_CPU_ACCESS_FLAG,
+            D3D11_MAPPED_SUBRESOURCE,
+            D3D11_MAP,
         },
     );
 }
