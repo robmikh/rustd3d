@@ -2,11 +2,11 @@ fn main() {
     windows::build!(
         windows::win32::system_services::{
             DXGI_ERROR_UNSUPPORTED,
-        }
+        },
         windows::win32::dxgi::{
             DXGI_FORMAT,
             DXGI_SAMPLE_DESC,
-        }
+        },
         windows::win32::direct3d11::{
             D3D11CreateDevice,
             D3D_DRIVER_TYPE,
@@ -22,6 +22,6 @@ fn main() {
             ID3D11RenderTargetView,
             ID3D11Texture2D,
             ID3D11DeviceChild,
-        }
+        },
     );
 }
