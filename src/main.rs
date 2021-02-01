@@ -1,17 +1,28 @@
+mod dispatcher_queue;
+mod window;
+
 use bindings::windows::{
+    foundation::numerics::Vector2,
+    ui::{composition::Compositor, Colors},
     win32::{
         direct3d11::{
             D3D11CreateDevice, ID3D11Device, ID3D11RenderTargetView, ID3D11Resource,
-            D3D11_BIND_FLAG, D3D11_CPU_ACCESS_FLAG, D3D11_CREATE_DEVICE_FLAG, D3D11_MAP,
-            D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE,
-            D3D_DRIVER_TYPE,
+            ID3D11Texture2D, D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION, D3D_DRIVER_TYPE,
         },
-        dxgi::{DXGI_FORMAT, DXGI_SAMPLE_DESC},
+        dxgi::{
+            IDXGIAdapter, IDXGIDevice2, IDXGIFactory2, IDXGIObject, DXGI_ALPHA_MODE, DXGI_FORMAT,
+            DXGI_PRESENT_PARAMETERS, DXGI_SAMPLE_DESC, DXGI_SCALING, DXGI_SWAP_CHAIN_DESC1,
+            DXGI_SWAP_EFFECT, DXGI_USAGE_RENDER_TARGET_OUTPUT,
+        },
         system_services::DXGI_ERROR_UNSUPPORTED,
+        windows_and_messaging::{DispatchMessageA, GetMessageA, HWND, MSG},
+        winrt::{ICompositorDesktopInterop, ICompositorInterop, RoInitialize, RO_INIT_TYPE},
     },
-    ErrorCode,
+    ErrorCode, IUnknown,
 };
-use windows::Interface;
+use dispatcher_queue::create_dispatcher_queue_controller_for_current_thread;
+use window::BasicWindow;
+use windows::{Abi, Interface};
 
 fn create_d3d_device_with_type(
     driver_type: D3D_DRIVER_TYPE,
@@ -52,63 +63,100 @@ fn create_d3d_device() -> windows::Result<ID3D11Device> {
     Ok(device.unwrap())
 }
 
+fn dxgi_object_get_parent<T: Interface + Abi>(object: &IDXGIObject) -> windows::Result<T> {
+    let mut parent: Option<T> = None;
+    object
+        .GetParent(&T::IID, &mut parent as *mut _ as *mut _)
+        .ok()?;
+    Ok(parent.unwrap())
+}
+
 fn main() -> windows::Result<()> {
-    println!("Creating device and context...");
-    let device = create_d3d_device()?;
-    let context = {
+    unsafe {
+        RoInitialize(RO_INIT_TYPE::RO_INIT_SINGLETHREADED).ok()?;
+    }
+
+    let _controller = create_dispatcher_queue_controller_for_current_thread()?;
+
+    let window = BasicWindow::new(500, 600, "rustd3d.MainWindow", "rustd3d");
+
+    let compositor = Compositor::new()?;
+    let target = {
+        let compositor_desktop: ICompositorDesktopInterop = compositor.cast()?;
+        let mut target = None;
+        compositor_desktop
+            .CreateDesktopWindowTarget(window.handle(), false.into(), &mut target)
+            .ok()?;
+        target.unwrap()
+    };
+    let background = compositor.create_sprite_visual()?;
+    background.set_relative_size_adjustment(Vector2 { x: 1.0, y: 1.0 })?;
+    background.set_brush(compositor.create_color_brush_with_color(Colors::black()?)?)?;
+    target.set_root(&background)?;
+
+    let visual = compositor.create_sprite_visual()?;
+    visual.set_relative_size_adjustment(Vector2 { x: 1.0, y: 1.0 })?;
+    background.children()?.insert_at_top(&visual)?;
+    let brush = compositor.create_surface_brush()?;
+    visual.set_brush(&brush)?;
+
+    let d3d_device = create_d3d_device()?;
+    let d3d_context = {
         let mut context = None;
-        device.GetImmediateContext(&mut context);
+        d3d_device.GetImmediateContext(&mut context);
         context.unwrap()
     };
 
-    println!("Creating texture...");
-    let texture_desc = D3D11_TEXTURE2D_DESC {
+    let swap_chain_desc = DXGI_SWAP_CHAIN_DESC1 {
         width: 500,
         height: 600,
-        mip_levels: 1,
-        array_size: 1,
         format: DXGI_FORMAT::DXGI_FORMAT_B8G8R8A8_UNORM,
+        stereo: false.into(),
         sample_desc: DXGI_SAMPLE_DESC {
             count: 1,
             quality: 0,
         },
-        usage: D3D11_USAGE::D3D11_USAGE_DEFAULT,
-        bind_flags: D3D11_BIND_FLAG::D3D11_BIND_RENDER_TARGET.0 as u32,
-        cpu_access_flags: 0,
-        misc_flags: 0,
+        buffer_usage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
+        buffer_count: 2,
+        scaling: DXGI_SCALING::DXGI_SCALING_STRETCH,
+        swap_effect: DXGI_SWAP_EFFECT::DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
+        alpha_mode: DXGI_ALPHA_MODE::DXGI_ALPHA_MODE_PREMULTIPLIED,
+        flags: 0,
     };
-    let texture = {
-        let mut texture = None;
-        device
-            .CreateTexture2D(&texture_desc, std::ptr::null(), &mut texture)
+    let dxgi_device: IDXGIDevice2 = d3d_device.cast()?;
+    let dxgi_adapter = dxgi_object_get_parent::<IDXGIAdapter>(&dxgi_device.cast()?)?;
+    let dxgi_factory = dxgi_object_get_parent::<IDXGIFactory2>(&dxgi_adapter.cast()?)?;
+    let swap_chain = {
+        let mut swap_chain = None;
+        dxgi_factory
+            .CreateSwapChainForComposition(&dxgi_device, &swap_chain_desc, None, &mut swap_chain)
             .ok()?;
-        texture.unwrap()
+        swap_chain.unwrap()
     };
 
-    println!(
-        "D3D11_TEXTURE2D_DESC size in bytes: {}",
-        std::mem::size_of::<D3D11_TEXTURE2D_DESC>()
-    );
+    let surface = {
+        let unknown: IUnknown = swap_chain.cast()?;
+        let compositor_interop: ICompositorInterop = compositor.cast()?;
+        let mut surface = None;
+        compositor_interop
+            .CreateCompositionSurfaceForSwapChain(Some(unknown), &mut surface)
+            .ok()?;
+        surface.unwrap()
+    };
+    brush.set_surface(surface)?;
 
-    println!("Testing GetDesc...");
-    let mut desc = D3D11_TEXTURE2D_DESC::default();
-    texture.GetDesc(&mut desc);
-    assert_eq!(desc.width, texture_desc.width);
-    assert_eq!(desc.height, texture_desc.height);
-    assert_eq!(desc.mip_levels, texture_desc.mip_levels);
-    assert_eq!(desc.array_size, texture_desc.array_size);
-    assert_eq!(desc.format, texture_desc.format);
-    assert_eq!(desc.sample_desc, texture_desc.sample_desc);
-    assert_eq!(desc.usage, texture_desc.usage);
-    assert_eq!(desc.bind_flags, texture_desc.bind_flags);
-    assert_eq!(desc.cpu_access_flags, texture_desc.cpu_access_flags);
-    assert_eq!(desc.misc_flags, texture_desc.misc_flags);
+    let back_buffer: ID3D11Texture2D = {
+        let mut buffer = None;
+        swap_chain
+            .GetBuffer(0, &ID3D11Texture2D::IID, &mut buffer as *mut _ as _)
+            .ok()?;
+        buffer.unwrap()
+    };
 
-    println!("Creating render target view...");
     let render_target_view = {
-        let resource: ID3D11Resource = texture.cast()?;
+        let resource: ID3D11Resource = back_buffer.cast()?;
         let mut render_target_view = None;
-        device
+        d3d_device
             .CreateRenderTargetView(Some(resource), std::ptr::null(), &mut render_target_view)
             .ok()?;
         render_target_view
@@ -116,70 +164,20 @@ fn main() -> windows::Result<()> {
             .cast::<ID3D11RenderTargetView>()?
     };
 
-    println!("Clearing render target view...");
-    context.ClearRenderTargetView(
+    d3d_context.ClearRenderTargetView(
         Some(render_target_view),
         &[1.0f32, 0.0, 0.0, 1.0] as *const f32,
     );
 
-    // Check to see that the texture was properly cleared
+    let present_params = DXGI_PRESENT_PARAMETERS::default();
+    swap_chain.Present1(1, 0, &present_params).ok()?;
 
-    println!("Creating staging texture...");
-    desc.usage = D3D11_USAGE::D3D11_USAGE_STAGING;
-    desc.bind_flags = 0;
-    desc.cpu_access_flags = D3D11_CPU_ACCESS_FLAG::D3D11_CPU_ACCESS_READ.0 as u32;
-    desc.misc_flags = 0;
-    let staging_texture = {
-        let mut texture = None;
-        device
-            .CreateTexture2D(&desc, std::ptr::null(), &mut texture)
-            .ok()?;
-        texture.unwrap()
-    };
-    context.CopyResource(&staging_texture, &texture);
+    unsafe {
+        let mut message = MSG::default();
+        while GetMessageA(&mut message, HWND(0), 0, 0).into() {
+            DispatchMessageA(&mut message);
+        }
+    }
 
-    // Map the staging texture and check the center pixel
-    let resource: ID3D11Resource = staging_texture.cast()?;
-    let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-    context
-        .Map(
-            Some(resource.clone()),
-            0,
-            D3D11_MAP::D3D11_MAP_READ,
-            0,
-            &mut mapped as *mut _,
-        )
-        .ok()?;
-
-    let slice: &[u8] = unsafe {
-        std::slice::from_raw_parts(
-            mapped.p_data as *const _,
-            (desc.height * mapped.row_pitch) as usize,
-        )
-    };
-
-    println!("Checking the center of the texture...");
-    let width = desc.width;
-    let height = desc.height;
-    let x = width / 2;
-    let y = height / 2;
-    let bytes_per_pixel = 4;
-    let offset = ((y * mapped.row_pitch) + (x * bytes_per_pixel)) as usize;
-
-    // BGRA
-    let blue = slice[offset + 0];
-    let green = slice[offset + 1];
-    let red = slice[offset + 2];
-    let alpha = slice[offset + 3];
-
-    assert_eq!(blue, 0);
-    assert_eq!(green, 0);
-    assert_eq!(red, 255);
-    assert_eq!(alpha, 255);
-    println!("Passed!");
-
-    context.Unmap(Some(resource), 0);
-
-    println!("Done!");
     Ok(())
 }

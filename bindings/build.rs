@@ -2,10 +2,24 @@ fn main() {
     windows::build!(
         windows::win32::system_services::{
             DXGI_ERROR_UNSUPPORTED,
+            CreateDispatcherQueueController,
+            GetModuleHandleA, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, HINSTANCE, IDC_ARROW, LRESULT, 
+            WM_DESTROY, WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_NCCREATE, GWLP_USERDATA, WS_EX_NOREDIRECTIONBITMAP,
         },
         windows::win32::dxgi::{
             DXGI_FORMAT,
             DXGI_SAMPLE_DESC,
+            DXGI_SWAP_CHAIN_DESC1,
+            DXGI_SCALING,
+            DXGI_SWAP_EFFECT,
+            DXGI_ALPHA_MODE,
+            IDXGIDevice2,
+            IDXGIAdapter,
+            IDXGIFactory2, 
+            IDXGISwapChain1,
+            IDXGIObject,
+            DXGI_USAGE_RENDER_TARGET_OUTPUT,
+            DXGI_PRESENT_PARAMETERS,
         },
         windows::win32::direct3d11::{
             D3D11CreateDevice,
@@ -26,5 +40,25 @@ fn main() {
             D3D11_MAPPED_SUBRESOURCE,
             D3D11_MAP,
         },
+        windows::win32::menus_and_resources::{LoadCursorA, HMENU},
+        windows::win32::windows_and_messaging::{
+            CreateWindowExA, DefWindowProcA, DispatchMessageA, GetMessageA, PostQuitMessage,
+            RegisterClassA, HWND, LPARAM, MSG, WNDCLASSA, WPARAM, TranslateMessage, CREATESTRUCTA,
+        },
+        windows::win32::winrt::{
+            RoInitialize,
+            RO_INIT_TYPE,
+            ICompositorDesktopInterop,
+            ICompositorInterop,
+        },
+        windows::system::{
+            DispatcherQueueController,
+            DispatcherQueue,
+            DispatcherQueueHandler,
+        },
+        windows::ui::composition::{
+            Compositor,
+        },
+        windows::ui::Colors,
     );
 }
